@@ -1,0 +1,5 @@
+Django==5.1.6
+mysqlclient==2.2.0
+pandas==2.2.2
+django-import-export==4.1.0
+django-simpleui==2024.3.1

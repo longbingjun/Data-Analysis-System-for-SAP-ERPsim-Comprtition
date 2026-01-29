@@ -1,0 +1,317 @@
+{% extends "admin/change_list.html" %}
+{% load static %}
+{% load common_tags %}
+
+{% block content %}
+<div style="margin-bottom: 30px;">
+    <div id="echarts-bar" style="width: 100%; height: 420px;"></div>
+    <button id="export-btn" style="margin-top:10px;">导出图片</button>
+</div>
+<div style="margin-bottom: 30px;">
+    <label for="round-select" style="font-weight:bold;">选择轮次：</label>
+    <select id="round-select" style="margin-right:10px;">
+        <option value="1">第一轮（1月5日-1月20日）</option>
+        <option value="2">第二轮（2月5日-2月20日）</option>
+        <option value="3">第三轮（3月5日-3月20日）</option>
+        <option value="4">第四轮（4月5日-4月20日）</option>
+    </select>
+    <button id="export-btn-round" style="margin-top:10px;">导出图片</button>
+    <div id="echarts-bar-round" style="width: 100%; height: 420px; margin-top: 10px;"></div>
+</div>
+<div id="round-lists" style="display: flex; flex-wrap: wrap; gap: 24px; margin-top: 30px;">
+    <!-- 列表会由JS动态渲染 -->
+</div>
+<!-- 分地区偏好列表 -->
+<div style="margin-top:30px;">
+    <h3 style="font-weight:bold;">分地区产品偏好排行</h3>
+    <table class="table" style="width:100%;text-align:center;">
+        <thead>
+            <tr>
+                <th>排名</th>
+                <th>产品</th>
+                <th>North</th>
+                <th>South</th>
+                <th>West</th>
+                <th>三地区比例</th>
+                <th>应分配库存</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in region_list %}
+                <tr style="font-weight:bold; color:{% if row.rank <= 4 %}#5470C6{% elif row.rank <= 7 %}#91CC75{% elif row.rank <= 10 %}#FAC858{% else %}#333{% endif %};">
+                    <td>{{ row.rank }}</td>
+                    <td>{{ row.material_description }}</td>
+                    <td>{{ row.north|floatformat:2 }}</td>
+                    <td>{{ row.south|floatformat:2 }}</td>
+                    <td>{{ row.west|floatformat:2 }}</td>
+                    <td>{{ row.ratio }}</td>
+                    <td>{{ row.stock }}</td>
+                </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+<!-- 利润排行成本价输入表单（左右两列：1kg 与 500g，每行一个产品） -->
+<div style="margin-top:40px;">
+    <form method="post" style="margin-bottom:20px;">
+        {% csrf_token %}
+        <input type="hidden" name="cost_update" value="1">
+        <div style="display:flex; gap:24px; align-items:flex-start;">
+            <div style="flex:1; min-width:320px;">
+                <div style="font-weight:bold; margin-bottom:8px;">设置各产品成本价（1kg 大包装）</div>
+                <div>
+                    {% for mat in all_products_1kg %}
+                        <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; padding:6px 0;">
+                            <span style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{{ mat }}</span>
+                            <input type="number" step="0.01" name="cost_{{ mat }}" value="{{ cost_dict|get_item:mat|default_if_none:'' }}" style="width:96px;">
+                        </div>
+                    {% empty %}
+                        <div style="color:#888;">暂无 1kg 产品</div>
+                    {% endfor %}
+                </div>
+            </div>
+            <div style="flex:1; min-width:320px;">
+                <div style="font-weight:bold; margin-bottom:8px;">设置各产品成本价（500g 小包装）</div>
+                <div>
+                    {% for mat in all_products_500g %}
+                        <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; padding:6px 0;">
+                            <span style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{{ mat }}</span>
+                            <input type="number" step="0.01" name="cost_{{ mat }}" value="{{ cost_dict|get_item:mat|default_if_none:'' }}" style="width:96px;">
+                        </div>
+                    {% empty %}
+                        <div style="color:#888;">暂无 500g 产品</div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+        <div style="margin-top:12px;">
+            <button type="submit" class="default">保存成本价</button>
+        </div>
+    </form>
+</div>
+<!-- 利润排行表格 -->
+<div style="margin-top:10px;">
+    <h3 style="font-weight:bold;">利润排行</h3>
+    <table class="table" style="width:100%;text-align:center;">
+        <thead>
+            <tr>
+                <th>排名</th>
+                <th>产品</th>
+                <th>Qty总和</th>
+                <th>单个利润</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in profit_sorted %}
+                <tr style="font-weight:bold; color:{% if row.qty_rank <= 4 %}#5470C6{% elif row.qty_rank <= 7 %}#91CC75{% else %}#FAC858{% endif %};">
+                    <td>{{ row.rank }}</td>
+                    <td>{{ row.material_description }}</td>
+                    <td>{{ row.qty|floatformat:2 }}</td>
+                    <td>{{ row.profit|floatformat:2 }}</td>
+                </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{{ block.super }}
+{% endblock %}
+
+{% block extrahead %}
+    {{ block.super }}
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+    <style>
+        .table th, .table td { padding: 8px 12px; }
+    </style>
+    <script>
+        // 总市场偏好数据
+        var chartData = {{ round_chart_data|safe }};
+        // 默认显示第一轮
+        var currentRound = "1";
+
+        // 柱状图分色函数
+        function getColors(len) {
+            var colors = [];
+            for (let i = 0; i < len; i++) {
+                if (i < 4) {
+                    colors.push('#5470C6'); // 前4名：蓝色
+                } else if (i < 7) {
+                    colors.push('#91CC75'); // 5-7名：绿色
+                } else if (i < 10) {
+                    colors.push('#FAC858'); // 8-10名：黄色
+                } else {
+                    colors.push('#C0C0C0'); // 其他：灰色
+                }
+            }
+            return colors;
+        }
+
+        // 渲染主市场偏好柱状图（所有数据合计）
+        function renderMainChart() {
+            // 合计所有轮次数据
+            var allData = [];
+            for (var k in chartData) {
+                chartData[k].forEach(function(item) {
+                    var found = allData.find(d => d.name === item.name);
+                    if (found) {
+                        found.qty += item.qty;
+                    } else {
+                        allData.push({name: item.name, qty: item.qty});
+                    }
+                });
+            }
+            // 按qty降序
+            allData.sort((a, b) => b.qty - a.qty);
+            var xData = allData.map(item => item.name);
+            var yData = allData.map(item => item.qty);
+            var colors = getColors(yData.length);
+
+            var myChart = echarts.init(document.getElementById('echarts-bar'));
+            var option = {
+                title: { text: '市场偏好柱状图（全部数据）', left: 'center' },
+                tooltip: { trigger: 'axis' },
+                xAxis: { type: 'category', data: xData, axisLabel: { rotate: 30, fontWeight: 'bold' } },
+                yAxis: { type: 'value', name: 'Qty总和', axisLabel: { fontWeight: 'bold' } },
+                series: [{
+                    name: 'Qty总和',
+                    type: 'bar',
+                    data: yData.map((v, i) => ({
+                        value: v,
+                        itemStyle: { color: colors[i] }
+                    })),
+                    label: {
+                        show: true,
+                        position: 'top',
+                        fontWeight: 'bold',
+                        color: '#333'
+                    },
+                    barWidth: 32,
+                }]
+            };
+            myChart.setOption(option);
+
+            // 导出图片
+            document.getElementById('export-btn').onclick = function() {
+                var url = myChart.getDataURL({ type: 'png' });
+                var a = document.createElement('a');
+                a.href = url;
+                a.download = '市场偏好柱状图_全部.png';
+                a.click();
+            };
+        }
+
+        // 渲染轮次柱状图
+        function renderRoundChart(round) {
+            var data = chartData[round] || [];
+            var xData = data.map(item => item.name);
+            var yData = data.map(item => item.qty);
+            var colors = getColors(yData.length);
+
+            var myChart = echarts.init(document.getElementById('echarts-bar-round'));
+            if (data.length === 0) {
+                myChart.clear();
+                myChart.setOption({
+                    title: { text: '该轮暂无数据', left: 'center', top: 'center', textStyle: { fontSize: 24, color: '#888' } }
+                });
+                return;
+            }
+            var option = {
+                title: { text: '市场偏好柱状图（第' + round + '轮）', left: 'center' },
+                tooltip: { trigger: 'axis' },
+                xAxis: { type: 'category', data: xData, axisLabel: { rotate: 30, fontWeight: 'bold' } },
+                yAxis: { type: 'value', name: 'Qty总和', axisLabel: { fontWeight: 'bold' } },
+                series: [{
+                    name: 'Qty总和',
+                    type: 'bar',
+                    data: yData.map((v, i) => ({
+                        value: v,
+                        itemStyle: { color: colors[i] }
+                    })),
+                    label: {
+                        show: true,
+                        position: 'top',
+                        fontWeight: 'bold',
+                        color: '#333'
+                    },
+                    barWidth: 32,
+                }]
+            };
+            myChart.setOption(option);
+
+            // 导出图片
+            document.getElementById('export-btn-round').onclick = function() {
+                var url = myChart.getDataURL({ type: 'png' });
+                var a = document.createElement('a');
+                a.href = url;
+                a.download = '市场偏好柱状图_第' + round + '轮.png';
+                a.click();
+            };
+        }
+
+        // 数字格式化为万
+        function formatQtyWan(qty) {
+            if (qty == null) return '-';
+            return Math.round(qty / 10000) + '万';
+        }
+
+        // 列表分色
+        function getRankColor(idx) {
+            if (idx < 4) return '#5470C6';      // 前4名：蓝色
+            if (idx < 7) return '#91CC75';      // 5-7名：绿色
+            if (idx < 10) return '#FAC858';     // 8-10名：黄色
+            return '#C0C0C0';                   // 其他：灰色
+        }
+
+        // 渲染所有轮次的列表
+        function renderRoundLists() {
+            var roundNames = {
+                "1": "第一轮（1月5日-1月20日）",
+                "2": "第二轮（2月5日-2月20日）",
+                "3": "第三轮（3月5日-3月20日）",
+                "4": "第四轮（4月5日-4月20日）"
+            };
+            var container = document.getElementById('round-lists');
+            container.innerHTML = '';
+            for (var round = 1; round <= 4; round++) {
+                var data = chartData[round] || [];
+                // 按qty降序
+                data = data.slice().sort((a, b) => b.qty - a.qty);
+                var highlight = (String(round) === currentRound) ? '2px solid #5470C6' : '1px solid #eee';
+                var html = `<div style="min-width:260px;max-width:320px;flex:1;border:${highlight};border-radius:8px;padding:8px 4px 12px 4px;margin-bottom:8px;background:#fafbff;">
+                    <div style="font-weight:bold;font-size:16px;margin-bottom:8px;text-align:center;">${roundNames[round]}</div>`;
+                if (data.length === 0) {
+                    html += `<div style="color:#888;text-align:center;">暂无数据</div>`;
+                } else {
+                    html += `<table style="width:100%;border-collapse:collapse;">
+                        <tr>
+                            <th style="text-align:left;padding:4px 8px;">排名</th>
+                            <th style="text-align:left;padding:4px 8px;">产品</th>
+                            <th style="text-align:right;padding:4px 8px;">Qty(万)</th>
+                        </tr>`;
+                    data.forEach(function(item, idx) {
+                        var color = getRankColor(idx);
+                        html += `<tr>
+                            <td style="padding:4px 8px;color:${color};font-weight:bold;">${idx+1}</td>
+                            <td style="padding:4px 8px;color:${color};font-weight:bold;">${item.name}</td>
+                            <td style="padding:4px 8px;text-align:right;color:${color};font-weight:bold;">${formatQtyWan(item.qty)}</td>
+                        </tr>`;
+                    });
+                    html += `</table>`;
+                }
+                html += `</div>`;
+                container.innerHTML += html;
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', function() {
+            renderMainChart();
+            renderRoundChart(currentRound);
+            renderRoundLists();
+
+            document.getElementById('round-select').addEventListener('change', function() {
+                currentRound = this.value;
+                renderRoundChart(currentRound);
+                renderRoundLists();
+            });
+        });
+    </script>
+{% endblock %}

@@ -1,0 +1,180 @@
+{% extends "admin/change_list.html" %}
+{% load static %}
+
+{% block content %}
+<div style="margin-bottom: 30px;">
+    <label style="font-weight:bold;">选择包装：</label>
+    <select id="pack-select" style="margin-right:10px;">
+        <option value="1kg">大包装（1kg）</option>
+        <option value="500g">小包装（500g）</option>
+    </select>
+    <label style="font-weight:bold;">选择轮次：</label>
+    <select id="round-select" style="margin-right:10px;">
+        <option value="1">第1轮</option>
+        <option value="2">第2轮</option>
+        <option value="3">第3轮</option>
+        <option value="4">第4轮</option>
+    </select>
+    <label style="font-weight:bold;">选择产品：</label>
+    <select id="mat-select" style="margin-right:10px;"></select>
+    <button id="export-btn-line" style="margin-top:10px;">导出图片</button>
+    <div id="echarts-line" style="width: 100%; height: 420px; margin-top: 10px;"></div>
+</div>
+{% endblock %}
+
+{% block extrahead %}
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+    <script>
+        var chart1kg = JSON.parse('{{ chart_1kg|default:"{}"|escapejs }}');
+        var chart500g = JSON.parse('{{ chart_500g|default:"{}"|escapejs }}');
+        var mats1kg = JSON.parse('{{ mats_1kg|default:"[]"|escapejs }}');
+        var mats500g = JSON.parse('{{ mats_500g|default:"[]"|escapejs }}');
+        console.log('chart1kg', chart1kg);
+
+        // 渲染产品下拉
+        function renderMatSelect(type, round) {
+            var mats = (type === '1kg') ? mats1kg : mats500g;
+            var chartData = (type === '1kg') ? chart1kg : chart500g;
+            var matSelect = document.getElementById('mat-select');
+            matSelect.innerHTML = '';
+            mats.forEach(function(mat) {
+                // 只显示有数据的产品
+                if (chartData[round] && chartData[round][mat]) {
+                    var opt = document.createElement('option');
+                    opt.value = mat;
+                    opt.text = mat;
+                    matSelect.appendChild(opt);
+                }
+            });
+        }
+
+        // 渲染图表
+        function renderCompareChart(type, round, mat) {
+            var chartData = (type === '1kg') ? chart1kg : chart500g;
+            var data = (chartData[round] && chartData[round][mat]) ? chartData[round][mat] : null;
+            var dom = document.getElementById('echarts-line');
+            var myChart = echarts.init(dom);
+
+            if (!data) {
+                myChart.clear();
+                myChart.setOption({
+                    title: { text: '暂无数据', left: 'center' }
+                });
+                return;
+            }
+
+            var option = {
+                title: { text: `第${round}轮${type === '1kg' ? '大包装' : '小包装'}市场价格对比图`, left: 'center' },
+                tooltip: {
+                    trigger: 'axis',
+                    formatter: function(params) {
+                        let res = params[0].axisValue + '<br/>';
+                        params.forEach(function(p) {
+                            if (p.value !== null && p.value !== undefined) {
+                                res += p.marker + p.seriesName + ': ' + p.value.toFixed(2) + '<br/>';
+                            }
+                        });
+                        return res;
+                    }
+                },
+                legend: { data: ['市场最高价', '市场最低价', '本组价格'], top: 30 },
+                xAxis: { type: 'category', data: data.x, axisLabel: { rotate: 30, fontWeight: 'bold' } },
+                yAxis: { type: 'value', name: 'Price', axisLabel: { fontWeight: 'bold' } },
+                series: [
+                    {
+                        name: '市场最高价',
+                        type: 'line',
+                        data: data.market_max,
+                        label: { 
+                            show: true, 
+                            position: 'top', 
+                            color: '#003366',
+                            formatter: function(params) {
+                                return params.value !== null ? params.value.toFixed(2) : '';
+                            }
+                        },
+                        symbol: 'circle',
+                        symbolSize: 8,
+                        lineStyle: { width: 2, color: '#003366' },
+                        itemStyle: { color: '#003366', opacity: 1 },
+                        emphasis: { focus: 'series', lineStyle: { width: 5, color: '#003366' } },
+                        z: 2
+                    },
+                    {
+                        name: '市场最低价',
+                        type: 'line',
+                        data: data.market_min,
+                        label: { 
+                            show: true, 
+                            position: 'bottom', 
+                            color: '#87CEFA',
+                            formatter: function(params) {
+                                return params.value !== null ? params.value.toFixed(2) : '';
+                            }
+                        },
+                        symbol: 'circle',
+                        symbolSize: 8,
+                        lineStyle: { width: 2, color: '#87CEFA', type: 'dashed' },
+                        itemStyle: { color: '#87CEFA', opacity: 1 },
+                        emphasis: { focus: 'series', lineStyle: { width: 5, color: '#87CEFA' } },
+                        z: 2
+                    },
+                    {
+                        name: '本组价格',
+                        type: 'line',
+                        data: data.group_price,
+                        label: {
+                            show: true,
+                            position: 'top',
+                            color: '#FF9900',
+                            formatter: function(params) {
+                                return params.value !== null ? params.value.toFixed(2) : '';
+                            }
+                        },
+                        symbol: 'circle',
+                        symbolSize: 10,
+                        lineStyle: { width: 2, color: '#FF9900' },
+                        itemStyle: { color: '#FF9900', opacity: 1 },
+                        emphasis: { focus: 'series', lineStyle: { width: 5, color: '#FF9900' } },
+                        z: 3
+                    }
+                ]
+            };
+            myChart.setOption(option);
+
+            // 导出图片
+            document.getElementById('export-btn-line').onclick = function() {
+                var url = myChart.getDataURL({ type: 'png' });
+                var a = document.createElement('a');
+                a.href = url;
+                a.download = `第${round}轮${type === '1kg' ? '大包装' : '小包装'}市场价格对比图.png`;
+                a.click();
+            };
+        }
+
+        document.addEventListener('DOMContentLoaded', function() {
+            var type = '1kg';
+            var round = '1';
+            renderMatSelect(type, round);
+            var mat = document.getElementById('mat-select').value;
+            renderCompareChart(type, round, mat);
+
+            document.getElementById('pack-select').addEventListener('change', function() {
+                type = this.value;
+                renderMatSelect(type, round);
+                mat = document.getElementById('mat-select').value;
+                renderCompareChart(type, round, mat);
+            });
+            document.getElementById('round-select').addEventListener('change', function() {
+                round = this.value;
+                renderMatSelect(type, round);
+                mat = document.getElementById('mat-select').value;
+                renderCompareChart(type, round, mat);
+            });
+            document.getElementById('mat-select').addEventListener('change', function() {
+                mat = this.value;
+                renderCompareChart(type, round, mat);
+            });
+        });
+    </script>
+{% endblock %}
