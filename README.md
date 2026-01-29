@@ -214,9 +214,9 @@ ERP/
 
 ## 联系方式
 
-- 项目作者：[Your Name]
-- 邮箱：[your.email@example.com]
-- 比赛成绩：ERPsim INTERNATIONAL Competition 2025 - 国际赛季军
+- 项目作者：Bingjun Long
+- 邮箱：bingjunlong@link.cuhk.edu.cn
+- 比赛成绩：ERPsim INTERNATIONAL Competition 2025 - 3rd place in the international season
 
 ---
 
